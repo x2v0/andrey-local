@@ -16,7 +16,7 @@ self.__BUILD_MANIFEST = {
     "beforeFiles": [
       {
         "source": "/5s9bbrdpq/_next/:path+",
-        "destination": "/_next/:path+"
+        "destination": "./_next/:path+"
       },
       {
         "source": "/templates/([\\w-]*-|):id(\\w+)",
