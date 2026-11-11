@@ -1,4 +1,4 @@
-"""Download FULL Next.js app, strip CDN prefix, patch links."""
+"""Radical Next.js vendoring: patch publicPath and download missing files."""
 import asyncio
 from playwright.async_api import async_playwright
 import pathlib, os, re, urllib.parse
@@ -25,7 +25,6 @@ async def main():
                     parsed = urllib.parse.urlparse(url)
                     path = parsed.path.lstrip("/")
                     
-                    # ГЛАВНЫЙ ФИКС: Срезаем префикс /5s9bbrdpq/ из пути сохранения!
                     if path.startswith("5s9bbrdpq/"):
                         path = path[len("5s9bbrdpq/"):]
                         
@@ -44,25 +43,59 @@ async def main():
 
         await c.route("**/*", handle_route)
         page = await c.new_page()
-        print("Navigating and downloading the ENTIRE Next.js app...")
+        print("Navigating...")
         await page.goto(TARGET, wait_until="networkidle", timeout=90000)
         
-        # Прокручиваем, чтобы триггернуть ленивую загрузку скриптов
-        for _ in range(8):
-            await page.mouse.wheel(0, 1000)
-            await page.wait_for_timeout(1000)
+        for _ in range(10):
+            await page.mouse.wheel(0, 2000)
+            await page.wait_for_timeout(800)
             
         await page.wait_for_timeout(5000)
         html = await page.content()
+        
+        # Принудительно скачиваем nomodule скрипты (0c0hxoamwjsbw.js)
+        soup = BeautifulSoup(html, "html.parser")
+        import urllib.request
+        for script in soup.find_all("script", nomodule=True):
+            src = script.get("src")
+            if src and src.startswith("http"):
+                try:
+                    req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req) as r:
+                        data = r.read()
+                    path = urllib.parse.urlparse(src).path.lstrip("/")
+                    if path.startswith("5s9bbrdpq/"): path = path[len("5s9bbrdpq/"):]
+                    filepath = ROOT / path
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    with open(filepath, "wb") as f:
+                        f.write(data)
+                except: pass
+                
         await b.close()
 
-    print("Patching HTML...")
-    html_str = html.replace("https://assets.gammahosted.com/5s9bbrdpq", "")
-    html_str = html_str.replace("https://assets.gammahosted.com", "")
-    html_str = html_str.replace("url('/**/')", "none").replace('url("/**/")', "none")
+    print("Radically patching ALL files...")
     
+    # ВОТ ИСПРАВЛЕННАЯ РЕГУЛЯРКА (одинарные слэши)
+    cdn_regex = re.compile(r'https?://assets\.gammahosted\.com(?:/5s9bbrdpq)?')
+
+    html_str = cdn_regex.sub('', html)
     pathlib.Path("index.html").write_text(html_str, encoding="utf-8")
-    print("✅ index.html generated. Structure is correct now.")
+
+    patched_count = 0
+    for filepath in ROOT.rglob("*"):
+        if filepath.is_file() and filepath.suffix in [".js", ".css", ".json"]:
+            try:
+                content = filepath.read_text(encoding="utf-8", errors="ignore")
+                if "gammahosted.com" in content:
+                    content = cdn_regex.sub('', content)
+                    filepath.write_text(content, encoding="utf-8")
+                    patched_count += 1
+            except Exception:
+                pass
+
+    print(f"✅ Done. Patched {patched_count} JS/CSS/JSON files.")
 
 if __name__ == "__main__":
+    from bs4 import BeautifulSoup
+    import urllib.request
     asyncio.run(main())
